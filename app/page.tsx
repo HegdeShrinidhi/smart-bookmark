@@ -17,12 +17,17 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('');
   const [showAddForm, setShowAddForm] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => {
+    // Show loading spinner if OAuth callback is happening
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).has('code');
+    }
+    return false;
+  });
   const [error, setError] = useState<string | null>(null);
 
   const loadBookmarks = async () => {
     if (!user) return;
-    setIsLoading(true);
     setError(null);
     try {
       const data = await getBookmarks(
@@ -32,8 +37,6 @@ export default function Home() {
       setBookmarks(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load bookmarks');
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -50,26 +53,25 @@ export default function Home() {
   // Check authentication status
   useEffect(() => {
     const supabase = createClient();
+    let isMounted = true;
 
-    // Get initial session
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user);
-      setIsLoading(false);
-    });
-
-    // Listen for auth changes
+    // Listen for auth changes - this is the source of truth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadBookmarks();
-        loadTags();
-      } else {
-        setBookmarks([]);
-        setAllTags([]);
+      if (isMounted) {
+        setUser(session?.user ?? null);
+        setIsLoading(false); // Stop loading after auth state is determined
+        if (session?.user) {
+          loadBookmarks();
+          loadTags();
+        } else {
+          setBookmarks([]);
+          setAllTags([]);
+        }
       }
     });
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, []);
@@ -161,6 +163,20 @@ export default function Home() {
       setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId));
     }
   };
+
+  // Show loading screen while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-cyan-50 to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+        <div className="text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gradient-to-r from-teal-500 to-cyan-500 animate-spin">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-50 via-cyan-50 to-slate-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950"></div>
+          </div>
+          <p className="mt-4 text-slate-600 dark:text-slate-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Show login screen if not authenticated
   if (!user) {
